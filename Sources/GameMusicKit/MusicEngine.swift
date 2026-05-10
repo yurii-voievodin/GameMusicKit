@@ -14,6 +14,12 @@ public final class MusicEngine: @unchecked Sendable {
         engine.connect(sampler, to: engine.mainMixerNode, format: nil)
     }
 
+    /// Output volume in range 0.0 – 1.0. Applied on the main mixer node.
+    public var volume: Float {
+        get { engine.mainMixerNode.outputVolume }
+        set { engine.mainMixerNode.outputVolume = max(0, min(1, newValue)) }
+    }
+
     public func start() throws {
         engine.prepare()
         try engine.start()
