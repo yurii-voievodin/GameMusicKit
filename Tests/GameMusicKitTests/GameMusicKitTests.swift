@@ -45,3 +45,58 @@ import Testing
     #expect(mutated.notes.count == original.notes.count)
     #expect(mutated.tempo == original.tempo)
 }
+
+@Test func defaultGenreMatchesLegacyBasePattern() {
+    #expect(MusicGenre.sadAMinor.basePattern == MusicPattern.basePattern)
+    #expect(MusicGenre.sadAMinor.tempoRange == 60...70)
+    #expect(MusicGenre.sadAMinor.velocityRange == 40...80)
+    #expect(MusicGenre.sadAMinor.durationRange == 0.3...0.6)
+}
+
+@Test func allBuiltInGenresBasePatternsAreInRange() {
+    for genre in MusicGenre.allBuiltIn {
+        #expect(genre.tempoRange.contains(genre.basePattern.tempo), "tempo out of range in \(genre.name)")
+        for note in genre.basePattern.notes {
+            #expect(genre.velocityRange.contains(note.velocity), "velocity out of range in \(genre.name)")
+            #expect(genre.durationRange.contains(note.duration), "duration out of range in \(genre.name)")
+            #expect(genre.scaleNotes.contains(note.midiNote), "note \(note.midiNote) not in scale for \(genre.name)")
+        }
+    }
+}
+
+@Test func sanitizedForGenreClampsToGenreRanges() {
+    let dirty = MusicPattern(
+        notes: [
+            MusicNote(midiNote: 200, duration: 5.0, velocity: 200),
+            MusicNote(midiNote: -5, duration: 0.0, velocity: 0),
+        ],
+        tempo: 9999
+    )
+    let clean = dirty.sanitized(for: .heroicCMajor)
+    #expect(clean.notes[0].midiNote == 127)
+    #expect(clean.notes[0].duration == 0.5)
+    #expect(clean.notes[0].velocity == 110)
+    #expect(clean.notes[1].midiNote == 0)
+    #expect(clean.notes[1].duration == 0.2)
+    #expect(clean.notes[1].velocity == 70)
+    #expect(clean.tempo == 130)
+}
+
+@Test func deterministicMutatorRespectsGenreScale() {
+    var m = DeterministicMutator(genre: .heroicCMajor)
+    let mutated = m.mutate(MusicGenre.heroicCMajor.basePattern)
+    let scale = MusicGenre.heroicCMajor.scaleNotes
+    #expect(mutated.notes.allSatisfy { scale.contains($0.midiNote) })
+    #expect(MusicGenre.heroicCMajor.tempoRange.contains(mutated.tempo))
+}
+
+@Test func variationGeneratorSwitchesGenreRanges() async throws {
+    let generator = VariationGenerator(genre: .sadAMinor)
+    await generator.setGenre(.heroicCMajor)
+    let seed = MusicGenre.heroicCMajor.basePattern
+    let result = try await generator.variation(of: seed)
+    #expect(result.notes.count == seed.notes.count)
+    #expect(MusicGenre.heroicCMajor.tempoRange.contains(result.tempo))
+    #expect(result.notes.allSatisfy { MusicGenre.heroicCMajor.velocityRange.contains($0.velocity) })
+    #expect(result.notes.allSatisfy { MusicGenre.heroicCMajor.durationRange.contains($0.duration) })
+}

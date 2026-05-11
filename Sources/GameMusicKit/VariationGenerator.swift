@@ -3,29 +3,33 @@ import FoundationModels
 
 public protocol VariationGenerating: Sendable {
     func variation(of pattern: MusicPattern) async throws -> MusicPattern
+    func setGenre(_ genre: MusicGenre) async
+}
+
+extension VariationGenerating {
+    /// Default no-op so existing conformers don't have to react to genre changes.
+    public func setGenre(_ genre: MusicGenre) async {}
 }
 
 /// Wraps `LanguageModelSession` to mutate a `MusicPattern` by 1–2 notes per call.
 /// Falls back to a deterministic local mutation when Foundation Models is
 /// unavailable (no entitlement, simulator, restricted device).
 public actor VariationGenerator: VariationGenerating {
-    private let session: LanguageModelSession?
+    private var session: LanguageModelSession?
     private var fallback: DeterministicMutator
+    private var genre: MusicGenre
 
-    public init() {
-        switch SystemLanguageModel.default.availability {
-        case .available:
-            self.session = LanguageModelSession(instructions: """
-                You are a music variation engine for a sad, austere 2D game.
-                Given a MIDI note pattern in JSON, return a slightly modified version.
-                Change only 1–2 notes or durations. Keep it in A minor (notes from \
-                57, 59, 60, 62, 64, 65, 67, 69). Keep tempo the same. Keep velocity \
-                in 40–80 and durations in 0.3–0.6. Return the same number of notes.
-                """)
-        case .unavailable:
-            self.session = nil
-        }
-        self.fallback = DeterministicMutator()
+    public init(genre: MusicGenre = .sadAMinor) {
+        self.genre = genre
+        self.fallback = DeterministicMutator(genre: genre)
+        self.session = Self.makeSession(for: genre)
+    }
+
+    public func setGenre(_ genre: MusicGenre) {
+        guard genre != self.genre else { return }
+        self.genre = genre
+        self.fallback = DeterministicMutator(genre: genre)
+        self.session = Self.makeSession(for: genre)
     }
 
     public func variation(of pattern: MusicPattern) async throws -> MusicPattern {
@@ -35,19 +39,32 @@ public actor VariationGenerator: VariationGenerating {
         let prompt = "Current pattern: \(try pattern.asJSON())"
         do {
             let response = try await session.respond(to: prompt, generating: MusicPattern.self)
-            let result = response.content.sanitized()
+            let result = response.content.sanitized(for: genre)
             return result.notes.count == pattern.notes.count ? result : fallback.mutate(pattern)
         } catch {
             return fallback.mutate(pattern)
         }
     }
+
+    private static func makeSession(for genre: MusicGenre) -> LanguageModelSession? {
+        switch SystemLanguageModel.default.availability {
+        case .available:
+            return LanguageModelSession(instructions: genre.instructions)
+        case .unavailable:
+            return nil
+        }
+    }
 }
 
-/// Deterministic A-minor scale walk: shifts one note to a neighbouring scale
-/// degree on each call. Keeps the demo audible without Foundation Models.
+/// Deterministic scale walk: shifts one note to a neighbouring scale degree on
+/// each call. Keeps the demo audible without Foundation Models.
 struct DeterministicMutator {
-    private let scale = [57, 59, 60, 62, 64, 65, 67, 69]
+    private let genre: MusicGenre
     private var step = 0
+
+    init(genre: MusicGenre = .sadAMinor) {
+        self.genre = genre
+    }
 
     mutating func mutate(_ pattern: MusicPattern) -> MusicPattern {
         guard !pattern.notes.isEmpty else { return pattern }
@@ -55,9 +72,10 @@ struct DeterministicMutator {
         step &+= 1
         var notes = pattern.notes
         let current = notes[index].midiNote
+        let scale = genre.scaleNotes
         let scaleIndex = scale.firstIndex(of: current) ?? 0
         let neighbour = scale[(scaleIndex + 1) % scale.count]
         notes[index].midiNote = neighbour
-        return MusicPattern(notes: notes, tempo: pattern.tempo).sanitized()
+        return MusicPattern(notes: notes, tempo: pattern.tempo).sanitized(for: genre)
     }
 }
