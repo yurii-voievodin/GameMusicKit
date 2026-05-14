@@ -61,6 +61,20 @@ extension MusicPattern {
         )
     }
 
+    /// Clamp every field into the supplied genre's supported range.
+    public func sanitized(for genre: MusicGenre) -> MusicPattern {
+        MusicPattern(
+            notes: notes.map { note in
+                MusicNote(
+                    midiNote: note.midiNote.clamped(to: 0...127),
+                    duration: note.duration.clamped(to: genre.durationRange),
+                    velocity: note.velocity.clamped(to: genre.velocityRange)
+                )
+            },
+            tempo: tempo.clamped(to: genre.tempoRange)
+        )
+    }
+
     public func asJSON() throws -> String {
         let data = try JSONEncoder().encode(self)
         return String(decoding: data, as: UTF8.self)
